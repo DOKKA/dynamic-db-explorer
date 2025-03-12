@@ -337,19 +337,20 @@ export default function Home() {
                 ) : error ? (
                   <div className="text-red-600">{error}</div>
                 ) : tableData && tableData.data.length > 0 ? (
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full bg-white border border-gray-300">
+                  <div className="overflow-x-auto shadow rounded-lg">
+                    <table className="min-w-full bg-white border border-gray-300 table-fixed" style={{ tableLayout: 'fixed' }}>
                       <thead>
                         <tr className="bg-gray-100">
                           {tableMetadata.columns.map(column => (
                             <th 
                               key={column.name}
-                              className="p-2 border-b border-gray-300 text-left font-medium"
+                              className="p-2 border-b border-gray-300 text-left font-medium max-w-[200px] overflow-hidden text-ellipsis whitespace-nowrap"
+                              title={column.name}
                             >
                               {column.name}
                             </th>
                           ))}
-                          <th className="p-2 border-b border-gray-300 text-left font-medium">
+                          <th className="p-2 border-b border-gray-300 text-left font-medium w-24">
                             Actions
                           </th>
                         </tr>
@@ -363,7 +364,11 @@ export default function Home() {
                             }`}
                           >
                             {tableMetadata.columns.map(column => (
-                              <td key={column.name} className="p-2">
+                              <td 
+                                key={column.name} 
+                                className="p-2 max-w-[200px] overflow-hidden text-ellipsis whitespace-nowrap"
+                                title={String(record[column.name] !== null ? record[column.name] : '')}
+                              >
                                 {String(record[column.name] !== null ? record[column.name] : '')}
                               </td>
                             ))}
@@ -419,16 +424,26 @@ export default function Home() {
                   <form className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {tableMetadata.columns.map(column => (
                       <div key={column.name} className="flex flex-col">
-                        <label className="mb-1 font-medium">
+                        <label className="mb-1 font-medium truncate" title={column.name}>
                           {column.name}
                           {!column.isNullable && <span className="text-red-600">*</span>}
                         </label>
-                        <input
-                          type="text"
-                          className="border border-gray-300 p-2 rounded"
-                          value={formData[column.name] || ''}
-                          onChange={e => handleFieldChange(column.name, e.target.value)}
-                        />
+                        {/* Use textarea for long text */}
+                        {column.dataType.toLowerCase().includes('text') || 
+                         (column.maxLength && column.maxLength > 255) ? (
+                          <textarea
+                            className="border border-gray-300 p-2 rounded h-24 resize-y"
+                            value={formData[column.name] || ''}
+                            onChange={e => handleFieldChange(column.name, e.target.value)}
+                          />
+                        ) : (
+                          <input
+                            type="text"
+                            className="border border-gray-300 p-2 rounded"
+                            value={formData[column.name] || ''}
+                            onChange={e => handleFieldChange(column.name, e.target.value)}
+                          />
+                        )}
                       </div>
                     ))}
                     <div className="col-span-full mt-4 flex justify-between">
