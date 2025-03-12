@@ -48,6 +48,8 @@ export default function Home() {
   const [formData, setFormData] = useState<Record<string, any>>({});
   const [isEditing, setIsEditing] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [relatedData, setRelatedData] = useState<Record<string, any[]>>({});
+  const [loadingRelatedData, setLoadingRelatedData] = useState<boolean>(false);
 
   // Fetch database schema on component mount
   useEffect(() => {
@@ -121,11 +123,52 @@ export default function Home() {
     setCurrentPage(1);
   };
 
+  // Fetch related data for foreign keys
+  const fetchRelatedData = async (foreignKeys: ForeignKeyMetadata[]) => {
+    if (foreignKeys.length === 0) return;
+    
+    try {
+      setLoadingRelatedData(true);
+      const newRelatedData: Record<string, any[]> = {};
+      
+      // Process each foreign key
+      for (const fk of foreignKeys) {
+        const encodedTableName = encodeURIComponent(fk.referencedTable);
+        console.log(`Fetching related data for ${fk.referencedTable}, column ${fk.columnName}`);
+        
+        const response = await fetch(`/api/tables/${encodedTableName}?page=1&pageSize=1000`);
+        
+        if (!response.ok) {
+          console.error(`Failed to fetch related data for ${fk.referencedTable}`);
+          continue;
+        }
+        
+        const data = await response.json();
+        
+        // Store the related data
+        newRelatedData[fk.columnName] = data.data;
+        console.log(`Fetched ${data.data.length} records for ${fk.columnName}`);
+      }
+      
+      setRelatedData(newRelatedData);
+    } catch (err) {
+      console.error('Error fetching related data:', err);
+    } finally {
+      setLoadingRelatedData(false);
+    }
+  };
+
   // Handle record selection
   const handleRecordSelect = (record: Record<string, any>) => {
     setSelectedRecord(record);
     setFormData({ ...record });
     setIsEditing(true);
+    
+    // Fetch related data for dropdown options
+    const tableMetadata = getSelectedTableMetadata();
+    if (tableMetadata) {
+      fetchRelatedData(tableMetadata.foreignKeys);
+    }
   };
 
   // Handle new record creation
@@ -133,6 +176,12 @@ export default function Home() {
     setSelectedRecord(null);
     setFormData({});
     setIsEditing(true);
+    
+    // Fetch related data for dropdown options
+    const tableMetadata = getSelectedTableMetadata();
+    if (tableMetadata) {
+      fetchRelatedData(tableMetadata.foreignKeys);
+    }
   };
 
   // Handle form field change
@@ -147,6 +196,31 @@ export default function Home() {
   const getSelectedTableMetadata = (): TableMetadata | null => {
     if (!schema || !selectedTable) return null;
     return schema.tables.find(table => table.name === selectedTable) || null;
+  };
+  
+  // Check if a column is a foreign key
+  const isForeignKey = (columnName: string): ForeignKeyMetadata | undefined => {
+    const tableMetadata = getSelectedTableMetadata();
+    if (!tableMetadata) return undefined;
+    
+    return tableMetadata.foreignKeys.find(fk => fk.columnName === columnName);
+  };
+  
+  // Find display field for a foreign key (usually the first non-primary key field)
+  const getDisplayField = (relatedData: any[]): string => {
+    if (!relatedData || relatedData.length === 0) return 'id';
+    
+    const firstRecord = relatedData[0];
+    const keys = Object.keys(firstRecord);
+    
+    // Try to find a good display field - prefer name, description, title, etc.
+    const nameFields = ['name', 'title', 'description', 'label', 'display_name', 'display'];
+    for (const field of nameFields) {
+      if (keys.includes(field)) return field;
+    }
+    
+    // If no good display field, just use the second field (assuming first is ID)
+    return keys.length > 1 ? keys[1] : keys[0];
   };
   
   // Save record (create or update)
@@ -428,15 +502,49 @@ export default function Home() {
                           {column.name}
                           {!column.isNullable && <span className="text-red-600">*</span>}
                         </label>
-                        {/* Use textarea for long text */}
-                        {column.dataType.toLowerCase().includes('text') || 
-                         (column.maxLength && column.maxLength > 255) ? (
+                        {/* Check if this is a foreign key */}
+                        {isForeignKey(column.name) ? (
+                          // Render dropdown for foreign key
+                          <select
+                            className="border border-gray-300 p-2 rounded"
+                            value={formData[column.name] || ''}
+                            onChange={e => handleFieldChange(column.name, e.target.value)}
+                            disabled={loadingRelatedData}
+                          >
+                            <option value="">
+                              {loadingRelatedData ? 'Loading...' : '-- Select --'}
+                            </option>
+                            {relatedData[column.name]?.map(relatedItem => {
+                              const fk = isForeignKey(column.name);
+                              const referencedField = fk ? fk.referencedColumn : 'id';
+                              const displayField = getDisplayField(relatedData[column.name]);
+                              
+                              // Handle case where referenced field doesn't exist
+                              if (!relatedItem[referencedField]) {
+                                return null;
+                              }
+                              
+                              return (
+                                <option 
+                                  key={relatedItem[referencedField]} 
+                                  value={relatedItem[referencedField]}
+                                >
+                                  {/* Show ID and name/title if available */}
+                                  {relatedItem[referencedField]} {relatedItem[displayField] ? `- ${relatedItem[displayField]}` : ''}
+                                </option>
+                              );
+                            })}
+                          </select>
+                        ) : column.dataType.toLowerCase().includes('text') || 
+                           (column.maxLength && column.maxLength > 255) ? (
+                          // Render textarea for long text
                           <textarea
                             className="border border-gray-300 p-2 rounded h-24 resize-y"
                             value={formData[column.name] || ''}
                             onChange={e => handleFieldChange(column.name, e.target.value)}
                           />
                         ) : (
+                          // Render regular input for other fields
                           <input
                             type="text"
                             className="border border-gray-300 p-2 rounded"
