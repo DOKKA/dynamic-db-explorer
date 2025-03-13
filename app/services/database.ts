@@ -15,6 +15,7 @@ export interface ColumnMetadata {
   maxLength?: number;
   precision?: number;
   scale?: number;
+  isIdentity?: number; // 1 for identity columns, 0 for non-identity columns
 }
 
 export interface ForeignKeyMetadata {
@@ -99,8 +100,19 @@ export const createConnection = (): Promise<Connection> => {
   });
 };
 
+// Parameter type information
+interface ParamTypeInfo {
+  type: typeof TYPES[keyof typeof TYPES]; // Using tedious TYPES
+  typeName: string; // SQL Server type name
+}
+
 // Execute a query and return results as an array of objects
-export const executeQuery = async (connection: Connection, query: string, params: any[] = []): Promise<any[]> => {
+export const executeQuery = async (
+  connection: Connection, 
+  query: string, 
+  params: any[] = [], 
+  paramTypes?: ParamTypeInfo[]
+): Promise<any[]> => {
   try {
     console.log(`Executing query: ${query.slice(0, 100)}${query.length > 100 ? '...' : ''}`);
     
@@ -161,9 +173,57 @@ export const executeQuery = async (connection: Connection, query: string, params
         
         // Add parameters to the request if any
         if (params && params.length > 0) {
+          // There should be a matching number of parameters and types if provided
           params.forEach((param, index) => {
-            // Note: This is simplified. In a real app, you would need to specify the proper TYPES
-            request.addParameter(`param${index}`, TYPES.VarChar, param);
+            // Get the parameter type info if available
+            const paramType = paramTypes && paramTypes[index] ? paramTypes[index] : null;
+            
+            // Handle different parameter types appropriately
+            if (param === null || param === undefined) {
+              // Use the specified type for null values, or default to NVarChar
+              request.addParameter(`param${index}`, paramType?.type || TYPES.NVarChar, null);
+            } else if (typeof param === 'number') {
+              if (Number.isInteger(param)) {
+                request.addParameter(`param${index}`, TYPES.Int, param);
+              } else {
+                request.addParameter(`param${index}`, TYPES.Float, param);
+              }
+            } else if (typeof param === 'boolean') {
+              request.addParameter(`param${index}`, TYPES.Bit, param);
+            } else if (param instanceof Date) {
+              request.addParameter(`param${index}`, TYPES.DateTime, param);
+            } else if (typeof param === 'string') {
+              if (paramType?.typeName === 'image' || paramType?.typeName === 'varbinary') {
+                // Handle binary data - convert to Buffer if possible
+                try {
+                  // For base64 encoded strings
+                  if (param.startsWith('data:') && param.includes(';base64,')) {
+                    const base64Data = param.split(';base64,')[1];
+                    const buffer = Buffer.from(base64Data, 'base64');
+                    request.addParameter(`param${index}`, TYPES.VarBinary, buffer);
+                  } else {
+                    // Skip binary fields that don't have valid data
+                    console.log(`Skipping binary field param${index} - not a valid base64 string`);
+                    request.addParameter(`param${index}`, TYPES.VarBinary, null);
+                  }
+                } catch (error) {
+                  console.error(`Error processing binary data for param${index}:`, error);
+                  request.addParameter(`param${index}`, TYPES.VarBinary, null);
+                }
+              } else if (param.length > 4000) {
+                request.addParameter(`param${index}`, TYPES.NText, param);
+              } else {
+                request.addParameter(`param${index}`, TYPES.NVarChar, param);
+              }
+            } else {
+              // Convert to string for any other type, unless it's binary
+              if (paramType?.typeName === 'image' || paramType?.typeName === 'varbinary') {
+                console.log(`Skipping binary field param${index} - unexpected type`);
+                request.addParameter(`param${index}`, TYPES.VarBinary, null);
+              } else {
+                request.addParameter(`param${index}`, TYPES.NVarChar, String(param));
+              }
+            }
           });
         }
         
@@ -205,18 +265,19 @@ export const getAllTables = async (connection: Connection): Promise<string[]> =>
 
 // Get table metadata including columns, primary keys, and foreign keys
 export const getTableMetadata = async (connection: Connection, tableName: string): Promise<TableMetadata> => {
-  // Get columns
+  // Get columns with identity information
   const columnsQuery = `
     SELECT 
-      COLUMN_NAME as name,
-      DATA_TYPE as dataType,
-      CASE WHEN IS_NULLABLE = 'YES' THEN 1 ELSE 0 END as isNullable,
-      CHARACTER_MAXIMUM_LENGTH as maxLength,
-      NUMERIC_PRECISION as precision,
-      NUMERIC_SCALE as scale
-    FROM INFORMATION_SCHEMA.COLUMNS
-    WHERE TABLE_NAME = '${tableName}'
-    ORDER BY ORDINAL_POSITION
+      c.COLUMN_NAME as name,
+      c.DATA_TYPE as dataType,
+      CASE WHEN c.IS_NULLABLE = 'YES' THEN 1 ELSE 0 END as isNullable,
+      c.CHARACTER_MAXIMUM_LENGTH as maxLength,
+      c.NUMERIC_PRECISION as precision,
+      c.NUMERIC_SCALE as scale,
+      COLUMNPROPERTY(OBJECT_ID('${tableName}'), c.COLUMN_NAME, 'IsIdentity') as isIdentity
+    FROM INFORMATION_SCHEMA.COLUMNS c
+    WHERE c.TABLE_NAME = '${tableName}'
+    ORDER BY c.ORDINAL_POSITION
   `;
   
   // Get primary keys
@@ -354,16 +415,119 @@ export const getTableData = async (
 
 // Insert a new record
 export const insertRecord = async (connection: Connection, tableName: string, data: Record<string, any>): Promise<void> => {
-  const columns = Object.keys(data);
-  const values = Object.values(data);
-  
-  const query = `
-    INSERT INTO [${tableName}] (${columns.map(c => `[${c}]`).join(', ')})
-    VALUES (${columns.map((_, i) => `@param${i}`).join(', ')})
-  `;
-  
-  await executeQuery(connection, query, values);
+  try {
+    // First, get table metadata to identify identity columns
+    console.log(`Getting metadata for table ${tableName} to identify identity columns`);
+    const tableMetadata = await getTableMetadata(connection, tableName);
+    
+    // Get a list of identity column names to exclude from insert
+    const identityColumns = tableMetadata.columns
+      .filter(col => col.isIdentity === 1)
+      .map(col => col.name);
+    
+    console.log(`Identity columns in ${tableName}:`, identityColumns);
+    
+    // Get column data types
+    const columnDataTypes = new Map<string, string>();
+    tableMetadata.columns.forEach(col => {
+      columnDataTypes.set(col.name, col.dataType.toLowerCase());
+    });
+    
+    // Filter out identity columns and nulls from the data
+    const filteredData: Record<string, any> = {};
+    const paramTypes: ParamTypeInfo[] = [];
+    
+    Object.keys(data).forEach(key => {
+      // Skip identity columns and null values for required columns
+      if (!identityColumns.includes(key) && (data[key] !== null || isNullableColumn(key, tableMetadata))) {
+        filteredData[key] = data[key];
+        
+        // Add type information
+        const typeName = columnDataTypes.get(key) || 'nvarchar';
+        paramTypes.push({
+          type: getTypeFromSqlType(typeName),
+          typeName: typeName
+        });
+      }
+    });
+    
+    // Ensure we have data to insert after filtering
+    if (Object.keys(filteredData).length === 0) {
+      console.warn(`No insertable data found for table ${tableName} after filtering identity columns`);
+      return;
+    }
+    
+    const columns = Object.keys(filteredData);
+    const values = Object.values(filteredData);
+    
+    const query = `
+      INSERT INTO [${tableName}] (${columns.map(c => `[${c}]`).join(', ')})
+      VALUES (${columns.map((_, i) => `@param${i}`).join(', ')})
+    `;
+    
+    await executeQuery(connection, query, values, paramTypes);
+  } catch (error) {
+    console.error(`Error in insertRecord for table ${tableName}:`, error);
+    throw error;
+  }
 };
+
+// Helper function to check if a column is nullable
+function isNullableColumn(columnName: string, tableMetadata: TableMetadata): boolean {
+  const column = tableMetadata.columns.find(col => col.name === columnName);
+  return column ? column.isNullable : false;
+}
+
+// Convert SQL Server type name to tedious TYPES
+function getTypeFromSqlType(sqlType: string): typeof TYPES[keyof typeof TYPES] {
+  // Normalize the type name to lowercase
+  sqlType = sqlType.toLowerCase();
+  
+  // Map SQL Server types to tedious TYPES
+  if (sqlType.includes('char') || sqlType.includes('text')) {
+    if (sqlType.includes('nvarchar') || sqlType.includes('nchar') || sqlType.includes('ntext')) {
+      return sqlType.includes('max') ? TYPES.NText : TYPES.NVarChar;
+    } else {
+      return sqlType.includes('max') ? TYPES.Text : TYPES.VarChar;
+    }
+  } else if (sqlType === 'bit') {
+    return TYPES.Bit;
+  } else if (sqlType.includes('int')) {
+    return TYPES.Int;
+  } else if (sqlType === 'bigint') {
+    return TYPES.BigInt;
+  } else if (sqlType === 'smallint') {
+    return TYPES.SmallInt;
+  } else if (sqlType === 'tinyint') {
+    return TYPES.TinyInt;
+  } else if (sqlType === 'float' || sqlType === 'real') {
+    return TYPES.Float;
+  } else if (sqlType === 'decimal' || sqlType === 'numeric' || sqlType === 'money' || sqlType === 'smallmoney') {
+    return TYPES.Decimal;
+  } else if (sqlType.includes('date')) {
+    if (sqlType === 'date') {
+      return TYPES.Date;
+    } else if (sqlType === 'datetime' || sqlType === 'datetime2') {
+      return TYPES.DateTime2;
+    } else if (sqlType === 'datetimeoffset') {
+      return TYPES.DateTimeOffset;
+    } else if (sqlType === 'smalldatetime') {
+      return TYPES.SmallDateTime;
+    }
+  } else if (sqlType.includes('time')) {
+    return TYPES.Time;
+  } else if (sqlType === 'uniqueidentifier') {
+    return TYPES.UniqueIdentifier;
+  } else if (sqlType === 'xml') {
+    return TYPES.Xml;
+  } else if (sqlType === 'image' || sqlType === 'binary' || sqlType === 'varbinary') {
+    return sqlType === 'image' ? TYPES.Image : TYPES.VarBinary;
+  }
+  
+  // Default to NVarChar for unknown types
+  console.warn(`Unrecognized SQL type: ${sqlType}, defaulting to NVarChar`);
+  return TYPES.NVarChar;
+}
 
 // Update a record
 export const updateRecord = async (
@@ -372,17 +536,65 @@ export const updateRecord = async (
   data: Record<string, any>, 
   whereCondition: string
 ): Promise<void> => {
-  const setClause = Object.keys(data)
-    .map((key, i) => `[${key}] = @param${i}`)
-    .join(', ');
-  
-  const query = `
-    UPDATE [${tableName}]
-    SET ${setClause}
-    WHERE ${whereCondition}
-  `;
-  
-  await executeQuery(connection, query, Object.values(data));
+  try {
+    // First, get table metadata to identify identity columns
+    console.log(`Getting metadata for table ${tableName} to identify identity columns`);
+    const tableMetadata = await getTableMetadata(connection, tableName);
+    
+    // Get a list of identity column names to exclude from update
+    const identityColumns = tableMetadata.columns
+      .filter(col => col.isIdentity === 1)
+      .map(col => col.name);
+    
+    console.log(`Identity columns in ${tableName}:`, identityColumns);
+    
+    // Get column data types
+    const columnDataTypes = new Map<string, string>();
+    tableMetadata.columns.forEach(col => {
+      columnDataTypes.set(col.name, col.dataType.toLowerCase());
+    });
+    
+    // Filter out identity columns from the data
+    const filteredData: Record<string, any> = {};
+    const filteredValues: any[] = [];
+    const paramTypes: ParamTypeInfo[] = [];
+    
+    Object.keys(data).forEach(key => {
+      if (!identityColumns.includes(key)) {
+        filteredData[key] = data[key];
+        filteredValues.push(data[key]);
+        
+        // Add type information
+        const typeName = columnDataTypes.get(key) || 'nvarchar';
+        paramTypes.push({
+          type: getTypeFromSqlType(typeName),
+          typeName: typeName
+        });
+      }
+    });
+    
+    // Ensure we have data to update after filtering
+    if (Object.keys(filteredData).length === 0) {
+      console.warn(`No updatable columns found for table ${tableName} after filtering identity columns`);
+      return;
+    }
+    
+    // Build the SET clause for the update query
+    const setClause = Object.keys(filteredData)
+      .map((key, i) => `[${key}] = @param${i}`)
+      .join(', ');
+    
+    const query = `
+      UPDATE [${tableName}]
+      SET ${setClause}
+      WHERE ${whereCondition}
+    `;
+    
+    await executeQuery(connection, query, filteredValues, paramTypes);
+  } catch (error) {
+    console.error(`Error in updateRecord for table ${tableName}:`, error);
+    throw error;
+  }
 };
 
 // Delete a record
