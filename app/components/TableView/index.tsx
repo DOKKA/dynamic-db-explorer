@@ -1,3 +1,5 @@
+"use client";
+
 import React, { useState } from 'react';
 import { TableMetadata, SchemaResponse } from '../../types';
 import { DataGrid } from './DataGrid';
@@ -67,23 +69,25 @@ export function TableView({
       </div>
 
       {/* Record form */}
-      <RecordForm
-        tableMetadata={tableMetadata}
-        selectedRecord={recordFormProps.selectedRecord}
-        formData={recordFormProps.formData}
-        isEditing={recordFormProps.isEditing}
-        isSaving={recordFormProps.isSaving}
-        relatedData={recordFormProps.relatedData}
-        loadingRelatedData={recordFormProps.loadingRelatedData}
-        schema={schema}
-        onFieldChange={recordFormProps.handleFieldChange}
-        onSave={recordFormProps.handleSaveRecord}
-        onDelete={recordFormProps.handleDeleteRecord}
-        onCancel={() => recordFormProps.setIsEditing(false)}
-        isForeignKey={recordFormProps.isForeignKey}
-        getDisplayField={recordFormProps.getDisplayField}
-        fetchTableData={fetchTableData}
-      />
+      {recordFormProps.isEditing && (
+        <RecordForm
+          tableMetadata={tableMetadata}
+          selectedRecord={recordFormProps.selectedRecord}
+          formData={recordFormProps.formData}
+          isEditing={recordFormProps.isEditing}
+          isSaving={recordFormProps.isSaving}
+          relatedData={recordFormProps.relatedData}
+          loadingRelatedData={recordFormProps.loadingRelatedData}
+          schema={schema}
+          onFieldChange={recordFormProps.handleFieldChange}
+          onSave={recordFormProps.handleSaveRecord}
+          onDelete={recordFormProps.handleDeleteRecord}
+          onCancel={() => recordFormProps.setIsEditing(false)}
+          isForeignKey={recordFormProps.isForeignKey}
+          getDisplayField={recordFormProps.getDisplayField}
+          fetchTableData={fetchTableData}
+        />
+      )}
     </main>
   );
 }

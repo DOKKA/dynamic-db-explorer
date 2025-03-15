@@ -1,3 +1,5 @@
+"use client";
+
 import React from 'react';
 import { TableMetadata, TableDataResponse } from '../../types';
 
@@ -32,9 +34,9 @@ export function DataGrid({
   }
   
   return (
-    <div className="overflow-x-auto shadow rounded-lg">
+    <div className="overflow-x-auto overflow-y-auto max-h-[70vh] shadow rounded-lg">
       <table className="min-w-full bg-white border border-gray-300 table-fixed" style={{ tableLayout: 'fixed' }}>
-        <thead>
+        <thead className="sticky top-0 z-10">
           <tr className="bg-gray-100">
             {tableMetadata.columns.map(column => (
               <th 
@@ -45,18 +47,16 @@ export function DataGrid({
                 {column.name}
               </th>
             ))}
-            <th className="p-2 border-b border-gray-300 text-left font-medium w-24">
-              Actions
-            </th>
           </tr>
         </thead>
         <tbody>
           {tableData.data.map((record, index) => (
             <tr 
               key={index}
-              className={`border-b border-gray-300 hover:bg-gray-50 ${
+              className={`border-b border-gray-300 hover:bg-gray-50 cursor-pointer ${
                 selectedRecord === record ? 'bg-blue-50' : ''
               }`}
+              onClick={() => onRecordSelect(record)}
             >
               {tableMetadata.columns.map(column => (
                 <td 
@@ -80,14 +80,6 @@ export function DataGrid({
                     : String(record[column.name] !== null ? record[column.name] : '')}
                 </td>
               ))}
-              <td className="p-2">
-                <button
-                  className="text-blue-600 hover:text-blue-800"
-                  onClick={() => onRecordSelect(record)}
-                >
-                  Edit
-                </button>
-              </td>
             </tr>
           ))}
         </tbody>

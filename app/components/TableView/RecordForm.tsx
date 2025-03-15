@@ -1,3 +1,5 @@
+"use client";
+
 import React, { useState, useEffect } from 'react';
 import { TableMetadata, ForeignKeyMetadata, SchemaResponse } from '../../types';
 import { Tabs, Tab } from './Tabs';
@@ -37,9 +39,6 @@ export function RecordForm({
   getDisplayField,
   fetchTableData
 }: RecordFormProps) {
-  if (!isEditing) {
-    return null;
-  }
 
   // State for related tables data
   const [relatedTables, setRelatedTables] = useState<{
@@ -186,8 +185,7 @@ export function RecordForm({
     
     return (
       <div className="p-4">
-        <div className="flex justify-between mb-4">
-          <h3 className="text-lg font-medium">Related Records in {tableName}</h3>
+        <div className="flex justify-end mb-4">
           <button 
             className="px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-sm"
             onClick={() => {
@@ -483,11 +481,6 @@ export function RecordForm({
 
   return (
     <div className="border-t border-gray-300 bg-gray-50">
-      <div className="p-4">
-        <h3 className="text-lg font-bold mb-2">
-          {selectedRecord ? 'Edit Record' : 'New Record'}
-        </h3>
-      </div>
       <Tabs 
         tabs={tabs} 
         defaultTab="edit" 
