@@ -76,6 +76,8 @@ export default function Home() {
             currentPage={currentPage}
             setCurrentPage={setCurrentPage}
             recordFormProps={recordFormProps}
+            schema={schema}
+            fetchTableData={fetchTableData}
           />
         ) : (
           <div className="flex items-center justify-center flex-1">

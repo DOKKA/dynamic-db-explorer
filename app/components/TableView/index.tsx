@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { TableMetadata } from '../../types';
+import { TableMetadata, SchemaResponse } from '../../types';
 import { DataGrid } from './DataGrid';
 import { Pagination } from './Pagination';
 import { RecordForm } from './RecordForm';
@@ -13,6 +13,8 @@ interface TableViewProps {
   currentPage: number;
   setCurrentPage: React.Dispatch<React.SetStateAction<number>>;
   recordFormProps: any;
+  schema: SchemaResponse | null;
+  fetchTableData: (tableName: string, page?: number) => Promise<void>;
 }
 
 export function TableView({
@@ -23,7 +25,9 @@ export function TableView({
   tableData,
   currentPage,
   setCurrentPage,
-  recordFormProps
+  recordFormProps,
+  schema,
+  fetchTableData
 }: TableViewProps) {
   return (
     <main className="flex-1 flex flex-col overflow-hidden">
@@ -71,12 +75,14 @@ export function TableView({
         isSaving={recordFormProps.isSaving}
         relatedData={recordFormProps.relatedData}
         loadingRelatedData={recordFormProps.loadingRelatedData}
+        schema={schema}
         onFieldChange={recordFormProps.handleFieldChange}
         onSave={recordFormProps.handleSaveRecord}
         onDelete={recordFormProps.handleDeleteRecord}
         onCancel={() => recordFormProps.setIsEditing(false)}
         isForeignKey={recordFormProps.isForeignKey}
         getDisplayField={recordFormProps.getDisplayField}
+        fetchTableData={fetchTableData}
       />
     </main>
   );
