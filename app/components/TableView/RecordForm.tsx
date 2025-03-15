@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { TableMetadata, ForeignKeyMetadata, SchemaResponse } from '../../types';
 import { Tabs, Tab } from './Tabs';
+import { DataGrid } from './DataGrid';
 
 interface RecordFormProps {
   tableMetadata: TableMetadata;
@@ -198,64 +199,21 @@ export function RecordForm({
           </button>
         </div>
         
-        <div className="overflow-x-auto shadow rounded-lg">
-          <table className="min-w-full bg-white border border-gray-300">
-            <thead>
-              <tr className="bg-gray-100">
-                {relatedTableMetadata.columns.slice(0, 6).map(column => (
-                  <th 
-                    key={column.name}
-                    className="p-2 border-b border-gray-300 text-left font-medium"
-                  >
-                    {column.name}
-                  </th>
-                ))}
-                <th className="p-2 border-b border-gray-300 text-left font-medium w-24">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.map((record, index) => (
-                <tr 
-                  key={index}
-                  className="border-b border-gray-300 hover:bg-gray-50"
-                >
-                  {relatedTableMetadata.columns.slice(0, 6).map(column => (
-                    <td 
-                      key={column.name} 
-                      className="p-2 max-w-[200px] overflow-hidden text-ellipsis whitespace-nowrap"
-                    >
-                      {record[column.name] !== null ? String(record[column.name]) : ''}
-                    </td>
-                  ))}
-                  <td className="p-2 space-x-2">
-                    <button
-                      className="text-blue-600 hover:text-blue-800 text-sm"
-                      onClick={() => {
-                        // Handle viewing/editing the related record
-                        alert(`Edit record ${JSON.stringify(record)} from ${tableName}`);
-                      }}
-                    >
-                      Edit
-                    </button>
-                    <button
-                      className="text-red-600 hover:text-red-800 text-sm"
-                      onClick={() => {
-                        // Handle deleting the related record
-                        if (confirm(`Are you sure you want to delete this record from ${tableName}?`)) {
-                          alert('Delete functionality would be implemented here');
-                        }
-                      }}
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataGrid
+          tableMetadata={relatedTableMetadata}
+          tableData={{
+            data: data,
+            total: total,
+            page: page
+          }}
+          selectedRecord={null}
+          onRecordSelect={(record) => {
+            // Handle viewing/editing the related record
+            alert(`Edit record ${JSON.stringify(record)} from ${tableName}`);
+          }}
+          loading={false}
+          error={null}
+        />
         
         {/* Simple pagination */}
         {total > 0 && (
